@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="h-full bg-slate-950 select-none">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>四號戰車 TZF 5f 瞄準鏡抽獎系統 (WWII Vintage & Ammo Loading Edition)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet">
+  <style>
+    .font-pixel { font-family: 'Press Start 2P', cursive, monospace; }
+    .font-vt323 { font-family: 'VT323', monospace; }
+    .font-tc { font-family: 'Noto Sans TC', sans-serif; }
+
+    /* 強制像素銳利化渲染 */
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      -ms-interpolation-mode: nearest-neighbor;
+    }
+
+    /* 街機 CRT 掃描線與老底片紋理 */
+    .arcade-scanlines {
+      background: linear-gradient(
+        rgba(18, 16, 26, 0) 50%, 
+        rgba(0, 0, 0, 0.45) 50%
+      );
+      background-size: 100% 4px;
+    }
+
+    /* 復古黃褐色/綠色微光膠卷效果 */
+    .vintage-sepia-overlay {
+      background: radial-gradient(circle, rgba(180, 140, 60, 0.08) 0%, rgba(20, 15, 5, 0.6) 85%);
+      mix-blend-mode: overlay;
+    }
+
+    @keyframes crtFlicker {
+      0% { opacity: 0.97; }
+      50% { opacity: 1; }
+      100% { opacity: 0.95; }
+    }
+    .crt-screen {
+      animation: crtFlicker 0.12s infinite;
+    }
+
+    /* 二戰復古金屬與橄欖綠風格面板 */
+    .ww2-panel {
+      background: rgba(20, 26, 22, 0.9);
+      backdrop-filter: blur(8px);
+      border: 2 border-solid;
+      border-color: #85704d #3d3524 #242017 #615237;
+      box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.8), 0 0 10px rgba(0,0,0,0.7);
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #121614; }
+    ::-webkit-scrollbar-thumb { background: #85704d; border-radius: 3px; }
+  </style>
+</head>
+<body class="h-full flex flex-col justify-center items-center overflow-hidden text-amber-100 font-tc relative bg-stone-950">
+
+  <!-- Header 導覽列 -->
+  <header class="absolute top-0 left-0 right-0 z-30 flex justify-between items-center px-6 py-2.5 ww2-panel border-b border-amber-800/50">
+    <div class="flex items-center gap-3">
+      <span class="inline-block w-3.5 h-3.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_#f59e0b]"></span>
+      <h1 class="font-pixel text-xs sm:text-sm text-amber-400 tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+        PZ.KPFW. IV Ausf. H — TZF 5f [WWII VINTAGE]
+      </h1>
+      <span class="hidden md:inline-block text-[11px] bg-stone-900 text-amber-200/80 px-3 py-1 rounded border border-amber-900/60 font-mono">
+        戰場座標: 橫濱碼頭 (Yokohama Port)
+      </span>
+    </div>
+    
+    <div class="flex items-center gap-2.5">
+      <button id="toggleFilterBtn" class="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-amber-300 border border-amber-700/60 rounded text-xs transition font-pixel shadow hover:border-amber-400">
+        📜 復古光學濾鏡: 開
+      </button>
+      <button id="toggleAudioBtn" class="px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-amber-300 border border-amber-700/60 rounded text-xs transition flex items-center gap-1.5 font-pixel shadow hover:border-amber-400">
+        🔊 <span id="audioStatusText">音效: 開</span>
+      </button>
+      <button id="openAdminBtn" class="px-3.5 py-1.5 bg-gradient-to-r from-amber-700 via-yellow-600 to-amber-700 hover:from-amber-600 hover:to-yellow-500 text-stone-950 font-bold border border-amber-300 rounded text-xs transition font-pixel flex items-center gap-1.5 shadow-lg">
+        ⚙️ 後台獎項設定
+      </button>
+    </div>
+  </header>
+
+  <!-- 主遊戲視窗 (640x360 點陣放大) -->
+  <main class="relative w-full h-full flex justify-center items-center p-2 pt-14 pb-14">
+    <div id="gameContainer" class="relative w-full max-w-6xl aspect-video rounded-xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.95)] border-4 border-stone-800 bg-black cursor-crosshair">
+      
+      <!-- 原生 32-Bit 像素 Canvas (640x360) -->
+      <canvas id="sightCanvas" class="w-full h-full block"></canvas>
+      
+      <!-- CRT 掃描線與老底片光影覆蓋層 -->
+      <div id="scanlinesOverlay" class="absolute inset-0 pointer-events-none arcade-scanlines crt-screen z-10"></div>
+      <div id="vintageFilterOverlay" class="absolute inset-0 pointer-events-none vintage-sepia-overlay z-10"></div>
+
+      <!-- 右下角: 開火與裝填控制區 -->
+      <div class="absolute bottom-5 right-5 z-20 flex flex-col items-end gap-2">
+        
+        <!-- 彈藥狀態指示器 -->
+        <div id="ammoStatusBox" class="ww2-panel px-4 py-2 rounded flex items-center gap-3 border border-amber-600/40 shadow-xl">
+          <div class="flex flex-col text-right">
+            <span class="text-[10px] text-amber-400/70 font-mono tracking-widest uppercase">主砲彈藥 75mm KwK 40</span>
+            <span id="ammoStateText" class="text-xs font-pixel text-emerald-400">● 待命 (FEUERBEREIT)</span>
+          </div>
+          <!-- 彈藥小圖示 -->
+          <div id="shellIconBox" class="w-8 h-8 rounded bg-stone-950 border border-amber-600/50 flex items-center justify-center text-lg shadow-inner">
+            🚀
+          </div>
+        </div>
+
+        <!-- 開火按鈕 -->
+        <button id="fireBtn" class="group relative px-8 py-3.5 bg-gradient-to-b from-red-700 via-red-800 to-red-950 hover:from-red-600 hover:to-red-900 active:scale-95 text-white font-pixel text-xs rounded-lg border-2 border-amber-500 shadow-2xl transition flex flex-col items-center">
+          <span class="text-[10px] text-amber-200 tracking-wider mb-0.5">75mm Pzgr. 39 APCBC</span>
+          <span class="text-base font-black tracking-widest text-yellow-300 group-hover:scale-105 transition drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">Ⓚ 擊發 [SPACE]</span>
+        </button>
+      </div>
+
+      <!-- 左上角 HUD 提示 -->
+      <div class="absolute top-5 left-5 z-20 pointer-events-none opacity-90">
+        <div class="ww2-panel px-4 py-2.5 rounded text-amber-300 font-pixel text-[10px] sm:text-xs shadow-2xl border border-amber-700/50">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+            標靶: 十字軍 Mk.III 巡航戰車 (Cruiser Tank)
+          </div>
+          <div class="text-stone-300 mt-1 font-tc text-[11px]">
+            移動滑鼠瞄準標靶 | 按空白鍵或點擊擊發 | 擊發後進行彈藥退殼與裝填
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- 中獎確認 Modal -->
+  <div id="prizeModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md hidden">
+    <div class="relative ww2-panel border-4 border-amber-500 rounded-2xl p-8 max-w-lg w-full mx-4 shadow-[0_0_80px_rgba(245,158,11,0.25)] text-center transform scale-95 transition-transform duration-200" id="prizeModalBox">
+      
+      <div class="absolute -top-5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-700 via-yellow-500 to-amber-700 text-stone-950 font-pixel text-xs px-6 py-2 rounded-full border border-amber-200 uppercase tracking-wider shadow-2xl font-black">
+        🎯 標靶擊毀 TARGET DESTROYED!
+      </div>
+
+      <div class="my-6 flex justify-center">
+        <div class="w-24 h-24 bg-gradient-to-br from-amber-600 via-orange-600 to-red-800 rounded-full flex items-center justify-center text-5xl shadow-2xl border-2 border-amber-300 animate-bounce">
+          💥
+        </div>
+      </div>
+
+      <h3 class="text-stone-400 font-pixel text-xs mb-1">戰果確認！獲得戰利品：</h3>
+      <div id="prizeNameDisplay" class="text-xl sm:text-2xl font-black text-amber-300 my-4 font-tc drop-shadow-[0_2px_10px_rgba(245,158,11,0.6)] border-y border-amber-600/40 py-4">
+        -- 特等獎 --
+      </div>
+      <p id="prizeDescDisplay" class="text-xs text-amber-200/80 font-vt323 text-xl mb-6">成功貫穿敵方戰車裝甲，戰果已登記！</p>
+
+      <button id="closePrizeBtn" class="w-full py-4 bg-gradient-to-r from-amber-600 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 font-pixel text-xs rounded-xl border border-amber-200 font-bold transition shadow-xl">
+        [ 裝填手下一發預備 / NEXT SHOT ]
+      </button>
+    </div>
+  </div>
+
+  <!-- 後台管理 Modal -->
+  <div id="adminModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md hidden">
+    <div class="relative ww2-panel border-2 border-amber-600/80 rounded-2xl p-6 max-w-3xl w-full mx-4 shadow-2xl max-h-[85vh] flex flex-col">
+      
+      <div class="flex justify-between items-center pb-4 border-b border-stone-700">
+        <h2 class="text-amber-400 font-pixel text-xs sm:text-sm flex items-center gap-2">
+          ⚙ 抽獎獎項後台管理 (WWII Admin)
+        </h2>
+        <button id="closeAdminBtn" class="text-stone-400 hover:text-white font-pixel text-xs">✕ 關閉</button>
+      </div>
+
+      <form id="addPrizeForm" class="my-4 bg-stone-900/90 p-4 rounded-xl border border-stone-700 grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs">
+        <input type="text" id="inputPrizeName" placeholder="獎項名稱 (例: A賞 1/35 四號戰車)" required class="sm:col-span-5 bg-stone-950 border border-stone-700 rounded px-3 py-2 text-amber-100 focus:outline-none focus:border-amber-500">
+        <input type="number" id="inputPrizeWeight" placeholder="權重/機率" min="1" value="10" required class="sm:col-span-3 bg-stone-950 border border-stone-700 rounded px-3 py-2 text-amber-100 focus:outline-none focus:border-amber-500">
+        <input type="number" id="inputPrizeQty" placeholder="數量 (-1無限)" value="-1" required class="sm:col-span-2 bg-stone-950 border border-stone-700 rounded px-3 py-2 text-amber-100 focus:outline-none focus:border-amber-500">
+        <button type="submit" class="sm:col-span-2 bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold rounded py-2 font-pixel text-[10px] transition shadow">
+          + 新增
+        </button>
+      </form>
+
+      <div class="flex-1 overflow-y-auto my-2 border border-stone-800 rounded-xl">
+        <table class="w-full text-left text-xs border-collapse">
+          <thead class="bg-stone-900 text-amber-400 font-pixel text-[10px] sticky top-0">
+            <tr>
+              <th class="p-3 border-b border-stone-800">獎項名稱</th>
+              <th class="p-3 border-b border-stone-800 w-24">權重</th>
+              <th class="p-3 border-b border-stone-800 w-24">剩餘數量</th>
+              <th class="p-3 border-b border-stone-800 w-20 text-center">操作</th>
+            </tr>
+          </thead>
+          <tbody id="prizeTableBody" class="divide-y divide-stone-800 font-tc">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 pt-3 border-t border-stone-800 flex justify-between items-center text-xs text-stone-400">
+        <span>資料自動儲存於 LocalStorage</span>
+        <button id="resetDefaultPrizesBtn" class="text-red-400 hover:text-red-300 underline font-pixel text-[10px]">
+          重置預設獎項
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- WebAudio 二戰金屬與重砲合成音效引擎 ---
+    class WebAudioWW2Engine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          this.ctx = new AudioContext();
+        }
+        if (this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      // 75mm KwK 重砲開火音效 (爆風 + 金屬震盪)
+      playCannonShot() {
+        if (!this.enabled || !this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // 衝擊波白噪音
+        const bufferSize = this.ctx.sampleRate * 0.9;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const output = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const whiteNoise = this.ctx.createBufferSource();
+        whiteNoise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(1400, now);
+        filter.frequency.exponentialRampToValueAtTime(25, now + 0.85);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(1.0, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+
+        whiteNoise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        whiteNoise.start(now);
+        whiteNoise.stop(now + 0.9);
+
+        // 重低音砲擊震波
+        const osc = this.ctx.createOscillator();
+        const oscGain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(190, now);
+        osc.frequency.exponentialRampToValueAtTime(12, now + 0.7);
+
+        oscGain.gain.setValueAtTime(0.95, now);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+        osc.connect(oscGain);
+        oscGain.connect(this.ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.7);
+      }
+
+      // 彈藥退殼音效 (黃銅彈殼拋出與金屬碰撞 "CLANG-PING!")
+      playShellEject() {
+        if (!this.enabled || !this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // 1. 金屬退殼撞擊
+        const osc1 = this.ctx.createOscillator();
+        const g1 = this.ctx.createGain();
+        osc1.type = 'triangle';
+        osc1.frequency.setValueAtTime(820, now);
+        osc1.frequency.exponentialRampToValueAtTime(220, now + 0.15);
+        g1.gain.setValueAtTime(0.5, now);
+        g1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc1.connect(g1);
+        g1.connect(this.ctx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.15);
+
+        // 2. 黃銅彈殼清脆迴響
+        const osc2 = this.ctx.createOscillator();
+        const g2 = this.ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(1650, now + 0.08);
+        osc2.frequency.exponentialRampToValueAtTime(1200, now + 0.4);
+        g2.gain.setValueAtTime(0.3, now + 0.08);
+        g2.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        osc2.connect(g2);
+        g2.connect(this.ctx.destination);
+        osc2.start(now + 0.08);
+        osc2.stop(now + 0.4);
+      }
+
+      // 砲彈推進與關閉砲閂音效 ("KLANG-CHICK!")
+      playShellLoadAndLock() {
+        if (!this.enabled || !this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        // 彈體推入砲膛的金屬摩擦聲
+        const bufferSize = this.ctx.sampleRate * 0.3;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(800, now);
+
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.4, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+        noise.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(this.ctx.destination);
+
+        noise.start(now);
+        noise.stop(now + 0.25);
+
+        // 砲閂契塊上鎖重音 (Breech Lock Block)
+        setTimeout(() => {
+          if (!this.ctx) return;
+          const lockTime = this.ctx.currentTime;
+          const lockOsc = this.ctx.createOscillator();
+          const lockGain = this.ctx.createGain();
+
+          lockOsc.type = 'square';
+          lockOsc.frequency.setValueAtTime(140, lockTime);
+          lockOsc.frequency.exponentialRampToValueAtTime(40, lockTime + 0.2);
+
+          lockGain.gain.setValueAtTime(0.7, lockTime);
+          lockGain.gain.exponentialRampToValueAtTime(0.001, lockTime + 0.2);
+
+          lockOsc.connect(lockGain);
+          lockGain.connect(this.ctx.destination);
+
+          lockOsc.start(lockTime);
+          lockOsc.stop(lockTime + 0.2);
+        }, 220);
+      }
+
+      // 命中敵艦/戰車爆炸聲
+      playExplosion() {
+        if (!this.enabled || !this.ctx) return;
+        const now = this.ctx.currentTime;
+
+        const bufferSize = this.ctx.sampleRate * 0.7;
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          data[i] = Math.random() * 2 - 1;
+        }
+
+        const noise = this.ctx.createBufferSource();
+        noise.buffer = buffer;
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(500, now);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(1.0, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        noise.start(now);
+        noise.stop(now + 0.7);
+      }
+
+      // 戰報 Jingle
+      playVictoryJingle() {
+        if (!this.enabled || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const melody = [
+          { f: 440.00, t: 0 },    // A4
+          { f: 554.37, t: 0.1 },  // C#5
+          { f: 659.25, t: 0.2 },  // E5
+          { f: 880.00, t: 0.32 }, // A5
+          { f: 783.99, t: 0.45 }, // G5
+          { f: 880.00, t: 0.60 }  // A5
+        ];
+        
+        melody.forEach(note => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(note.f, now + note.t);
+          
+          gain.gain.setValueAtTime(0.18, now + note.t);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + note.t + 0.25);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start(now + note.t);
+          osc.stop(now + note.t + 0.25);
+        });
+      }
+    }
+
+    const soundFx = new WebAudioWW2Engine();
+
+    // --- 抽獎資料庫 ---
+    const DEFAULT_PRIZES = [
+      { id: '1', name: '特等獎: 1/35 四號戰車H型 鋼鐵金屬紀念模型', weight: 5, qty: 1 },
+      { id: '2', name: '頭獎: 橫濱軍港限定 裝甲部隊復古外套', weight: 15, qty: 3 },
+      { id: '3', name: '貳獎: 十字軍戰車二戰光學圖鑑畫冊', weight: 25, qty: 5 },
+      { id: '4', name: '參獎: KwK 40 75mm 砲彈主題鑰匙圈', weight: 40, qty: 20 },
+      { id: '5', name: '銘謝惠顧: 75mm 戰車砲彈殼紀念卡片', weight: 100, qty: -1 }
+    ];
+
+    let prizes = JSON.parse(localStorage.getItem('panzer_prizes_ww2')) || DEFAULT_PRIZES;
+
+    function savePrizes() {
+      localStorage.setItem('panzer_prizes_ww2', JSON.stringify(prizes));
+      renderAdminTable();
+    }
+
+    function getRandomPrize() {
+      const validPrizes = prizes.filter(p => p.qty !== 0);
+      if (validPrizes.length === 0) {
+        return { name: '銘謝惠顧: 彈藥庫已耗盡!', qty: -1 };
+      }
+      const totalWeight = validPrizes.reduce((sum, p) => sum + Number(p.weight), 0);
+      let rand = Math.random() * totalWeight;
+      
+      for (let p of validPrizes) {
+        if (rand < p.weight) {
+          if (p.qty > 0) p.qty--;
+          savePrizes();
+          return p;
+        }
+        rand -= p.weight;
+      }
+      return validPrizes[0];
+    }
+
+    // --- Canvas 點陣引擎 (640x360) ---
+    const canvas = document.getElementById('sightCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const V_WIDTH = 640;
+    const V_HEIGHT = 360;
+    canvas.width = V_WIDTH;
+    canvas.height = V_HEIGHT;
+
+    let mousePos = { x: V_WIDTH / 2, y: V_HEIGHT / 2 };
+    let smoothAimPos = { x: V_WIDTH / 2, y: V_HEIGHT / 2 };
+    let recoil = 0;
+    let muzzleFlashTime = 0;
+    let explosions = [];
+    let dustParticles = [];
+    let targets = [];
+
+    // --- 裝填狀態機 ---
+    // READY -> FIRING -> REJECTING -> LOADING -> LOCKED -> READY
+    let isReloading = false;
+    let reloadProgress = 0; // 0.0 ~ 1.0
+    let reloadStep = 'READY'; // READY, EJECT, SLIDE, LOCK
+    let pendingPrize = null;
+
+    // 產生老底片漂浮微粒/灰塵
+    for (let i = 0; i < 35; i++) {
+      dustParticles.push({
+        x: Math.random() * V_WIDTH,
+        y: Math.random() * V_HEIGHT,
+        size: Math.random() > 0.8 ? 2 : 1,
+        alpha: Math.random() * 0.4 + 0.1,
+        speedY: (Math.random() - 0.5) * 0.2
+      });
+    }
+
+    // --- 32-Bit 點陣十字軍戰車 ---
+    class CrusaderTank32Bit {
+      constructor(x, y, speed) {
+        this.x = x;
+        this.y = y;
+        this.width = 170;
+        this.height = 80;
+        this.speed = speed;
+        this.destroyed = false;
+        this.wheelsAngle = 0;
+      }
+
+      update() {
+        if (!this.destroyed) {
+          this.x += this.speed;
+          this.wheelsAngle += this.speed * 0.2;
+          if (this.x > V_WIDTH + 180) {
+            this.x = -200;
+          }
+        }
+      }
+
+      draw(c) {
+        if (this.destroyed) return;
+
+        c.save();
+        c.translate(Math.floor(this.x), Math.floor(this.y));
+
+        const cOutline = '#081320';
+        const cBase = '#3ba0e8';
+        const cLight = '#6bc2f8';
+        const cDark = '#237bb8';
+        const cDarker = '#135486';
+        const cTread = '#19212a';
+        const cMetalHighlight = '#a2d6fc';
+
+        // 車底陰影
+        c.fillStyle = 'rgba(0,0,0,0.45)';
+        c.fillRect(-5, 72, 180, 8);
+
+        // 履帶
+        c.fillStyle = cTread;
+        c.fillRect(8, 64, 154, 10);
+
+        c.beginPath();
+        c.moveTo(8, 64); c.lineTo(-8, 54); c.lineTo(0, 48); c.lineTo(16, 64);
+        c.fill();
+
+        c.beginPath();
+        c.moveTo(162, 64); c.lineTo(178, 48); c.lineTo(170, 44); c.lineTo(154, 64);
+        c.fill();
+
+        c.fillStyle = '#475569';
+        const treadOffset = Math.floor(this.wheelsAngle % 6);
+        for (let tx = 10 + treadOffset; tx < 158; tx += 6) {
+          c.fillRect(tx, 70, 3, 2);
+        }
+
+        // 5 組 Christie 輪系
+        const wheelXs = [18, 46, 74, 102, 130];
+        wheelXs.forEach(wx => {
+          c.fillStyle = cOutline;
+          c.fillRect(wx - 1, 53, 22, 18);
+          c.fillRect(wx + 1, 51, 18, 22);
+
+          c.fillStyle = cDark;
+          c.fillRect(wx + 1, 53, 18, 18);
+
+          c.fillStyle = cBase;
+          c.fillRect(wx + 3, 55, 14, 14);
+
+          c.fillStyle = cLight;
+          c.fillRect(wx + 8, 60, 4, 4);
+          c.fillStyle = cDarker;
+          c.fillRect(wx + 5, 57, 2, 2);
+          c.fillRect(wx + 13, 57, 2, 2);
+          c.fillRect(wx + 5, 65, 2, 2);
+          c.fillRect(wx + 13, 65, 2, 2);
+        });
+
+        // 裙板與金屬鉚釘
+        c.fillStyle = cBase;
+        c.fillRect(0, 26, 158, 22);
+
+        c.fillStyle = cLight;
+        c.fillRect(0, 26, 158, 2);
+
+        c.fillStyle = cDark;
+        c.fillRect(0, 46, 158, 2);
+
+        c.fillStyle = cOutline;
+        c.fillRect(40, 26, 2, 22);
+        c.fillRect(80, 26, 2, 22);
+        c.fillRect(120, 26, 2, 22);
+
+        c.fillStyle = cMetalHighlight;
+        for (let rx = 5; rx < 155; rx += 12) {
+          c.fillRect(rx, 30, 2, 2);
+          c.fillRect(rx, 42, 2, 2);
+        }
+
+        // 斜車頭
+        c.fillStyle = cBase;
+        c.beginPath();
+        c.moveTo(152, 26); c.lineTo(175, 38); c.lineTo(158, 46); c.lineTo(152, 46);
+        c.fill();
+
+        c.fillStyle = cLight;
+        c.beginPath();
+        c.moveTo(152, 26); c.lineTo(175, 38); c.lineTo(173, 40); c.lineTo(152, 29);
+        c.fill();
+
+        // 機槍塔
+        c.fillStyle = cDarker;
+        c.fillRect(125, 20, 18, 8);
+        c.fillStyle = cBase;
+        c.fillRect(127, 21, 14, 6);
+        c.fillStyle = cOutline;
+        c.fillRect(141, 23, 8, 2);
+
+        // 車尾藍色油桶
+        c.fillStyle = cDark;
+        c.beginPath(); c.arc(-10, 24, 10, 0, Math.PI * 2); c.fill();
+        c.fillStyle = cBase;
+        c.beginPath(); c.arc(-10, 24, 8, 0, Math.PI * 2); c.fill();
+        
+        c.strokeStyle = '#78350f';
+        c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(-16, 16); c.lineTo(-4, 32); c.stroke();
+        c.fillStyle = '#fbbf24';
+        c.fillRect(-12, 22, 3, 3);
+
+        // 砲塔
+        c.fillStyle = cBase;
+        c.beginPath();
+        c.moveTo(42, 20); c.lineTo(58, 4); c.lineTo(110, 4); c.lineTo(124, 14); c.lineTo(120, 22); c.lineTo(42, 22);
+        c.fill();
+
+        c.fillStyle = cLight;
+        c.beginPath();
+        c.moveTo(58, 4); c.lineTo(110, 4); c.lineTo(120, 11); c.lineTo(58, 6);
+        c.fill();
+
+        c.fillStyle = cOutline;
+        c.fillRect(85, 4, 2, 18);
+
+        c.fillStyle = cMetalHighlight;
+        [50, 68, 78, 92, 104, 114].forEach(rx => {
+          c.fillRect(rx, 8, 2, 2);
+          c.fillRect(rx, 16, 2, 2);
+        });
+
+        c.fillStyle = cOutline;
+        c.fillRect(74, 10, 6, 3);
+        c.fillStyle = cLight;
+        c.fillRect(74, 12, 6, 1);
+
+        c.fillStyle = cDarker;
+        c.fillRect(72, 0, 16, 4);
+        c.fillStyle = cBase;
+        c.fillRect(74, 1, 12, 2);
+
+        // 砲管
+        c.fillStyle = cDarker;
+        c.fillRect(120, 10, 8, 10);
+        c.fillStyle = cBase;
+        c.fillRect(122, 11, 6, 8);
+
+        c.fillStyle = cDark;
+        c.fillRect(128, 13, 54, 4);
+        c.fillStyle = cBase;
+        c.fillRect(128, 13, 54, 2);
+
+        c.fillStyle = cDarker;
+        c.fillRect(182, 11, 6, 8);
+        c.fillStyle = cOutline;
+        c.fillRect(184, 12, 2, 6);
+
+        c.restore();
+      }
+    }
+
+    function initTanks() {
+      targets = [
+        new CrusaderTank32Bit(-40, 240, 1.8),
+        new CrusaderTank32Bit(-350, 240, 1.5),
+        new CrusaderTank32Bit(-700, 240, 2.0)
+      ];
+    }
+    initTanks();
+
+    // --- 背景: 橫濱港口復古點陣 (Yokohama Port) ---
+    function drawYokohama32BitBackground(c) {
+      const skyGrad = c.createLinearGradient(0, 0, 0, V_HEIGHT);
+      skyGrad.addColorStop(0, '#090d16');
+      skyGrad.addColorStop(0.35, '#1e1b4b');
+      skyGrad.addColorStop(0.65, '#581c87');
+      skyGrad.addColorStop(0.85, '#9a3412');
+      skyGrad.addColorStop(1, '#1e293b');
+      c.fillStyle = skyGrad;
+      c.fillRect(0, 0, V_WIDTH, V_HEIGHT);
+
+      // 大橋
+      c.fillStyle = '#1e1b2e';
+      c.beginPath();
+      c.moveTo(80, 210); c.lineTo(130, 150); c.lineTo(150, 150); c.lineTo(200, 210);
+      c.fill();
+      c.fillRect(0, 205, 360, 6);
+
+      // 龍門起重機
+      [420, 520, 580].forEach(x => {
+        c.fillStyle = '#dc2626';
+        c.fillRect(x, 110, 6, 95);
+        c.fillRect(x - 20, 110, 50, 5);
+        c.fillRect(x + 15, 110, 3, 30);
+        c.fillStyle = '#ffffff';
+        c.fillRect(x, 125, 6, 8);
+        c.fillRect(x, 155, 6, 8);
+      });
+
+      // 海面
+      c.fillStyle = '#0f172a';
+      c.fillRect(0, 205, V_WIDTH, 35);
+      c.fillStyle = '#38bdf8';
+      for (let i = 0; i < V_WIDTH; i += 30) {
+        c.fillRect((i + Date.now() * 0.03) % V_WIDTH, 215, 15, 1);
+        c.fillRect((i * 1.5 + Date.now() * 0.02) % V_WIDTH, 228, 12, 1);
+      }
+
+      // 碼頭地面
+      c.fillStyle = '#334155';
+      c.fillRect(0, 235, V_WIDTH, V_HEIGHT - 235);
+      c.fillStyle = '#0f172a';
+      c.fillRect(0, 235, V_WIDTH, 6);
+
+      // 貨櫃群
+      const containers = [
+        { x: 15, y: 175, w: 75, h: 60, color: '#991b1b' },
+        { x: 95, y: 195, w: 65, h: 40, color: '#1e40af' },
+        { x: 15, y: 135, w: 70, h: 40, color: '#166534' },
+        { x: 330, y: 180, w: 80, h: 55, color: '#ea580c' },
+        { x: 415, y: 195, w: 60, h: 40, color: '#1e40af' },
+        { x: 520, y: 170, w: 90, h: 65, color: '#047857' }
+      ];
+
+      containers.forEach(ct => {
+        c.fillStyle = ct.color;
+        c.fillRect(ct.x, ct.y, ct.w, ct.h);
+        c.strokeStyle = '#020617';
+        c.lineWidth = 2;
+        c.strokeRect(ct.x, ct.y, ct.w, ct.h);
+        
+        c.fillStyle = 'rgba(0,0,0,0.25)';
+        for (let rx = ct.x + 6; rx < ct.x + ct.w; rx += 8) {
+          c.fillRect(rx, ct.y + 2, 3, ct.h - 4);
+        }
+      });
+    }
+
+    // --- TZF 5f 瞄準鏡繪製 ---
+    function drawTZF5fScope(c, centerX, centerY) {
+      c.save();
+      c.translate(centerX, centerY);
+
+      const radius = 160;
+
+      // 暗角外框
+      c.save();
+      c.beginPath();
+      c.rect(-V_WIDTH, -V_HEIGHT, V_WIDTH * 2, V_HEIGHT * 2);
+      c.arc(0, 0, radius, 0, Math.PI * 2, true);
+      c.closePath();
+      c.fillStyle = '#030712';
+      c.fill();
+      c.restore();
+
+      // 金屬邊框
+      c.strokeStyle = '#44403c';
+      c.lineWidth = 6;
+      c.beginPath(); c.arc(0, 0, radius, 0, Math.PI * 2); c.stroke();
+
+      // 光學鍍膜綠微光
+      const glassGrad = c.createRadialGradient(-30, -30, 20, 0, 0, radius);
+      glassGrad.addColorStop(0, 'rgba(120, 200, 140, 0.08)');
+      glassGrad.addColorStop(1, 'rgba(10, 25, 15, 0.25)');
+      c.fillStyle = glassGrad;
+      c.beginPath(); c.arc(0, 0, radius - 4, 0, Math.PI * 2); c.fill();
+
+      // 蝕刻分劃線
+      c.strokeStyle = '#0f172a';
+      c.fillStyle = '#0f172a';
+      c.lineWidth = 1.5;
+
+      const drawTri = (x, y, size) => {
+        c.beginPath();
+        c.moveTo(x, y - size);
+        c.lineTo(x - size, y + size);
+        c.lineTo(x + size, y + size);
+        c.closePath();
+        c.stroke();
+      };
+
+      drawTri(0, 0, 8);
+      drawTri(-18, 0, 4); drawTri(-30, 0, 4); drawTri(-42, 0, 4);
+      drawTri(18, 0, 4); drawTri(30, 0, 4); drawTri(42, 0, 4);
+
+      c.font = '12px VT323, monospace';
+      c.textAlign = 'center';
+
+      // 上刻度
+      const rUpper = radius - 25;
+      const uAngleStart = -Math.PI * 0.45;
+      const uAngleEnd = 0.05;
+      const upperVals = [0, 2, 4, 6, 8, 10, 12];
+
+      upperVals.forEach((val, i) => {
+        const angle = uAngleStart + (i / (upperVals.length - 1)) * (uAngleEnd - uAngleStart);
+        const cx = Math.cos(angle) * rUpper;
+        const cy = Math.sin(angle) * rUpper;
+
+        c.beginPath(); c.arc(cx, cy, 3, 0, Math.PI * 2); c.stroke();
+
+        if (i % 2 === 0) {
+          const tx = Math.cos(angle) * (rUpper - 12);
+          const ty = Math.sin(angle) * (rUpper - 12);
+          c.fillText(val, tx, ty + 4);
+        }
+      });
+
+      const mgAngle = -Math.PI * 0.2;
+      c.fillText('M G u Pzgr', Math.cos(mgAngle) * (rUpper + 12), Math.sin(mgAngle) * (rUpper + 12));
+
+      // 下刻度
+      const rLower = radius - 25;
+      const lAngleStart = Math.PI * 0.12;
+      const lAngleEnd = Math.PI * 0.88;
+      const lowerVals = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30];
+
+      lowerVals.forEach((val, i) => {
+        const angle = lAngleStart + (i / (lowerVals.length - 1)) * (lAngleEnd - lAngleStart);
+        const cx = Math.cos(angle) * rLower;
+        const cy = Math.sin(angle) * rLower;
+
+        c.beginPath(); c.arc(cx, cy, 3, 0, Math.PI * 2); c.stroke();
+
+        if (i % 2 === 0) {
+          const tx = Math.cos(angle) * (rLower - 12);
+          const ty = Math.sin(angle) * (rLower - 12);
+          c.fillText(val, tx, ty + 4);
+        }
+      });
+
+      c.fillText('Sprgr.', 0, rLower - 12);
+
+      c.restore();
+    }
+
+    // --- 75mm 彈藥裝填特寫與動畫 (Interactive Breech Cutaway Overlay) ---
+    function drawBreechReloadSequence(c) {
+      if (!isReloading) return;
+
+      c.save();
+
+      // 左下角剖面裝填視窗
+      const boxW = 210;
+      const boxH = 90;
+      const boxX = 20;
+      const boxY = V_HEIGHT - boxH - 20;
+
+      // 底座面板
+      c.fillStyle = 'rgba(15, 23, 18, 0.92)';
+      c.fillRect(boxX, boxY, boxW, boxH);
+      c.strokeStyle = '#85704d';
+      c.lineWidth = 2;
+      c.strokeRect(boxX, boxY, boxW, boxH);
+
+      // 視窗標題
+      c.fillStyle = '#f59e0b';
+      c.font = '10px "Press Start 2P", monospace';
+      c.fillText('KWK 40 L/48 BREECH', boxX + 10, boxY + 16);
+
+      // 裝填進度條
+      c.fillStyle = '#292524';
+      c.fillRect(boxX + 10, boxY + 22, boxW - 20, 6);
+      c.fillStyle = reloadStep === 'LOCKED' ? '#10b981' : '#f59e0b';
+      c.fillRect(boxX + 10, boxY + 22, (boxW - 20) * reloadProgress, 6);
+
+      // 砲閂體與砲膛 (Breech Block Cutaway)
+      const chamberX = boxX + 110;
+      const chamberY = boxY + 45;
+
+      // 鋼鐵砲膛
+      c.fillStyle = '#44403c';
+      c.fillRect(chamberX, chamberY, 80, 28);
+      c.fillStyle = '#1c1917';
+      c.fillRect(chamberX + 2, chamberY + 4, 76, 20); // 膛室內部
+
+      // 退殼或進彈動畫計算
+      let shellX = boxX + 10;
+      let shellAlpha = 1.0;
+      let casingEjectX = chamberX;
+      let casingEjectY = chamberY;
+
+      if (reloadStep === 'EJECT') {
+        // 退殼動畫: 彈殼往左下飛出
+        const p = reloadProgress / 0.3;
+        casingEjectX = chamberX - p * 60;
+        casingEjectY = chamberY + p * 20;
+        
+        // 拋出的黃銅空彈殼
+        c.fillStyle = '#d97706';
+        c.fillRect(casingEjectX, casingEjectY + 4, 30, 12);
+        c.fillStyle = '#f59e0b';
+        c.fillRect(casingEjectX + 2, casingEjectY + 5, 26, 3);
+
+        // 煙霧顆粒
+        c.fillStyle = 'rgba(212, 212, 216, 0.4)';
+        c.beginPath();
+        c.arc(chamberX + 5, chamberY + 10, 6 + p * 8, 0, Math.PI * 2);
+        c.fill();
+
+      } else if (reloadStep === 'SLIDE' || reloadStep === 'LOCK') {
+        // 裝填新彈藥動畫: 75mm 穿甲彈由左推入砲膛
+        const p = (reloadProgress - 0.3) / 0.5; // 0 ~ 1
+        const targetX = chamberX - 10;
+        const startX = boxX - 40;
+        shellX = startX + (targetX - startX) * Math.min(p, 1.0);
+
+        // 繪製 32-Bit 75mm Pzgr. 39 完整砲彈
+        // 黃銅彈殼 (Brass Casing)
+        c.fillStyle = '#d97706';
+        c.fillRect(shellX, chamberY + 6, 40, 16);
+        c.fillStyle = '#fbbf24';
+        c.fillRect(shellX + 2, chamberY + 7, 36, 4);
+
+        // 彈頭 (Warhead & Fuse)
+        c.fillStyle = '#dc2626'; // 紅色帶
+        c.fillRect(shellX + 40, chamberY + 8, 6, 12);
+        c.fillStyle = '#27272a'; // 穿甲帽 (AP Cap)
+        c.beginPath();
+        c.moveTo(shellX + 46, chamberY + 8);
+        c.lineTo(shellX + 58, chamberY + 14);
+        c.lineTo(shellX + 46, chamberY + 20);
+        c.fill();
+      }
+
+      // 楔式砲閂 (Vertical Wedge Breech Block)
+      let wedgeY = chamberY - 12; // 開啟狀態
+      if (reloadStep === 'LOCK') {
+        const lp = (reloadProgress - 0.8) / 0.2;
+        wedgeY = chamberY - 12 + lp * 16; // 向上閂緊
+      } else if (reloadStep === 'EJECT' || reloadStep === 'SLIDE') {
+        wedgeY = chamberY + 18; // 下降滑開
+      }
+
+      c.fillStyle = '#78716c';
+      c.fillRect(chamberX - 6, wedgeY, 12, 32);
+      c.fillStyle = '#a8a29e';
+      c.fillRect(chamberX - 4, wedgeY + 2, 4, 28);
+
+      // 狀態動態文字
+      c.fillStyle = '#fde047';
+      c.font = '12px VT323, monospace';
+      if (reloadStep === 'EJECT') {
+        c.fillText('STATUS: EJECTING SPENT CASING...', boxX + 10, boxY + boxH - 10);
+      } else if (reloadStep === 'SLIDE') {
+        c.fillText('STATUS: LOADING 75mm PZGR. 39...', boxX + 10, boxY + boxH - 10);
+      } else if (reloadStep === 'LOCK') {
+        c.fillText('STATUS: CLOSING BREECH BLOCK!', boxX + 10, boxY + boxH - 10);
+      }
+
+      c.restore();
+    }
+
+    function createExplosion(x, y) {
+      soundFx.playExplosion();
+      for (let i = 0; i < 45; i++) {
+        explosions.push({
+          x: x,
+          y: y,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.5) * 8 - 2,
+          size: Math.floor(Math.random() * 5 + 2),
+          color: ['#fbbf24', '#f97316', '#ef4444', '#fde047', '#52525b'][Math.floor(Math.random() * 5)],
+          life: 1.0
+        });
+      }
+    }
+
+    // --- 主遊戲 Rendering Loop ---
+    function render() {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
+
+      ctx.save();
+
+      // 準心平滑滑行
+      smoothAimPos.x += (mousePos.x - smoothAimPos.x) * 0.25;
+      smoothAimPos.y += (mousePos.y - smoothAimPos.y) * 0.25;
+
+      // 後座力手震
+      if (recoil > 0) {
+        ctx.translate(Math.floor((Math.random() - 0.5) * recoil), Math.floor((Math.random() - 0.5) * recoil));
+        recoil *= 0.85;
+        if (recoil < 0.2) recoil = 0;
+      }
+
+      // 1. 繪製背景
+      drawYokohama32BitBackground(ctx);
+
+      // 2. 繪製目標戰車
+      targets.forEach(tank => {
+        tank.update();
+        tank.draw(ctx);
+      });
+
+      // 3. 爆炸粒子
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        let p = explosions[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.04;
+
+        if (p.life <= 0) {
+          explosions.splice(i, 1);
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.globalAlpha = p.life;
+          ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+          ctx.globalAlpha = 1.0;
+        }
+      }
+
+      // 4. 復古鏡片漂浮灰塵 (Vintage Dust Particles)
+      dustParticles.forEach(d => {
+        d.y += d.speedY;
+        if (d.y < 0) d.y = V_HEIGHT;
+        if (d.y > V_HEIGHT) d.y = 0;
+        ctx.fillStyle = `rgba(245, 230, 200, ${d.alpha})`;
+        ctx.fillRect(Math.floor(d.x), Math.floor(d.y), d.size, d.size);
+      });
+
+      ctx.restore();
+
+      // 5. TZF 5f 瞄準鏡
+      drawTZF5fScope(ctx, Math.floor(smoothAimPos.x), Math.floor(smoothAimPos.y));
+
+      // 6. 砲口火光
+      if (muzzleFlashTime > 0) {
+        ctx.fillStyle = `rgba(254, 240, 138, ${muzzleFlashTime * 0.65})`;
+        ctx.fillRect(0, 0, V_WIDTH, V_HEIGHT);
+        muzzleFlashTime -= 0.15;
+      }
+
+      // 7. 更新與繪製彈藥裝填動畫
+      updateReloadingState();
+      drawBreechReloadSequence(ctx);
+
+      requestAnimationFrame(render);
+    }
+
+    // --- 裝填邏輯控制器 ---
+    function startReloadSequence(prizeToAward) {
+      isReloading = true;
+      reloadProgress = 0;
+      reloadStep = 'EJECT';
+      pendingPrize = prizeToAward;
+
+      const ammoText = document.getElementById('ammoStateText');
+      const ammoBox = document.getElementById('shellIconBox');
+      const fireBtn = document.getElementById('fireBtn');
+
+      fireBtn.disabled = true;
+      fireBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+      ammoText.innerText = '● 退殼中 (AUSWURF)';
+      ammoText.className = 'text-xs font-pixel text-amber-400 animate-pulse';
+      ammoBox.innerText = '💨';
+
+      // Stage 1: 退殼音效
+      soundFx.playShellEject();
+    }
+
+    function updateReloadingState() {
+      if (!isReloading) return;
+
+      reloadProgress += 0.012; // 裝填總時長約 1.8 秒
+
+      const ammoText = document.getElementById('ammoStateText');
+      const ammoBox = document.getElementById('shellIconBox');
+
+      if (reloadProgress >= 0.25 && reloadStep === 'EJECT') {
+        reloadStep = 'SLIDE';
+        ammoText.innerText = '● 填彈中 (LADEN...)';
+        ammoText.className = 'text-xs font-pixel text-yellow-400 animate-pulse';
+        ammoBox.innerText = '⚙️';
+        soundFx.playShellLoadAndLock();
+
+      } else if (reloadProgress >= 0.80 && reloadStep === 'SLIDE') {
+        reloadStep = 'LOCK';
+        ammoText.innerText = '● 關閉砲閂 (VERRIEGELN)';
+        ammoText.className = 'text-xs font-pixel text-orange-400';
+        ammoBox.innerText = '🔒';
+
+      } else if (reloadProgress >= 1.0) {
+        isReloading = false;
+        reloadStep = 'READY';
+        reloadProgress = 1.0;
+
+        ammoText.innerText = '● 待命 (FEUERBEREIT)';
+        ammoText.className = 'text-xs font-pixel text-emerald-400';
+        ammoBox.innerText = '🚀';
+
+        const fireBtn = document.getElementById('fireBtn');
+        fireBtn.disabled = false;
+        fireBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+        // 裝填完成，彈出中獎 Modal
+        if (pendingPrize) {
+          showPrizeModal(pendingPrize);
+          pendingPrize = null;
+        }
+      }
+    }
+
+    // --- 開火觸發 ---
+    function fireCannon() {
+      if (isReloading) return;
+
+      soundFx.init();
+      soundFx.playCannonShot();
+
+      recoil = 22;
+      muzzleFlashTime = 1.0;
+
+      const aimX = smoothAimPos.x;
+      const aimY = smoothAimPos.y;
+
+      let hitTarget = null;
+
+      for (let tank of targets) {
+        if (!tank.destroyed &&
+            aimX >= tank.x && aimX <= tank.x + tank.width + 15 &&
+            aimY >= tank.y - 15 && aimY <= tank.y + tank.height + 15) {
+          hitTarget = tank;
+          break;
+        }
+      }
+
+      const prize = getRandomPrize();
+
+      if (hitTarget) {
+        hitTarget.destroyed = true;
+        createExplosion(hitTarget.x + 85, hitTarget.y + 25);
+
+        setTimeout(() => {
+          hitTarget.x = -200;
+          hitTarget.destroyed = false;
+        }, 2500);
+
+        startReloadSequence(prize);
+      } else {
+        // 未直接命中目標，依然進行彈藥裝填
+        startReloadSequence(null);
+      }
+    }
+
+    function showPrizeModal(prize) {
+      soundFx.playVictoryJingle();
+      document.getElementById('prizeNameDisplay').innerText = prize.name;
+      document.getElementById('prizeModal').classList.remove('hidden');
+    }
+
+    // --- 後台管理 ---
+    function renderAdminTable() {
+      const tbody = document.getElementById('prizeTableBody');
+      tbody.innerHTML = '';
+
+      prizes.forEach((p, idx) => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-stone-800/50';
+        tr.innerHTML = `
+          <td class="p-3 border-b border-stone-800 font-bold text-stone-200">${p.name}</td>
+          <td class="p-3 border-b border-stone-800 text-amber-400 font-pixel text-[10px]">${p.weight}</td>
+          <td class="p-3 border-b border-stone-800 text-amber-200 font-pixel text-[10px]">${p.qty === -1 ? '無限' : p.qty}</td>
+          <td class="p-3 border-b border-stone-800 text-center">
+            <button onclick="deletePrize(${idx})" class="text-red-400 hover:text-red-300 font-pixel text-[10px]">刪除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    window.deletePrize = function(idx) {
+      prizes.splice(idx, 1);
+      savePrizes();
+    };
+
+    // --- 事件監聽 ---
+    document.getElementById('fireBtn').addEventListener('click', fireCannon);
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = V_WIDTH / rect.width;
+      const scaleY = V_HEIGHT / rect.height;
+
+      mousePos.x = (e.clientX - rect.left) * scaleX;
+      mousePos.y = (e.clientY - rect.top) * scaleY;
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (e.touches.length > 0) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = V_WIDTH / rect.width;
+        const scaleY = V_HEIGHT / rect.height;
+
+        mousePos.x = (e.touches[0].clientX - rect.left) * scaleX;
+        mousePos.y = (e.touches[0].clientY - rect.top) * scaleY;
+      }
+    }, { passive: false });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        fireCannon();
+      }
+    });
+
+    document.getElementById('toggleFilterBtn').addEventListener('click', () => {
+      const overlay = document.getElementById('vintageFilterOverlay');
+      const btn = document.getElementById('toggleFilterBtn');
+      if (overlay.classList.contains('hidden')) {
+        overlay.classList.remove('hidden');
+        btn.innerText = '📜 復古光學濾鏡: 開';
+      } else {
+        overlay.classList.add('hidden');
+        btn.innerText = '📜 復古光學濾鏡: 關';
+      }
+    });
+
+    document.getElementById('toggleAudioBtn').addEventListener('click', () => {
+      soundFx.enabled = !soundFx.enabled;
+      document.getElementById('audioStatusText').innerText = soundFx.enabled ? '音效: 開' : '音效: 關';
+    });
+
+    document.getElementById('openAdminBtn').addEventListener('click', () => {
+      renderAdminTable();
+      document.getElementById('adminModal').classList.remove('hidden');
+    });
+
+    document.getElementById('closeAdminBtn').addEventListener('click', () => {
+      document.getElementById('adminModal').classList.add('hidden');
+    });
+
+    document.getElementById('closePrizeBtn').addEventListener('click', () => {
+      document.getElementById('prizeModal').classList.add('hidden');
+    });
+
+    document.getElementById('addPrizeForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('inputPrizeName').value.trim();
+      const weight = Number(document.getElementById('inputPrizeWeight').value);
+      const qty = Number(document.getElementById('inputPrizeQty').value);
+
+      if (name) {
+        prizes.push({ id: Date.now().toString(), name, weight, qty });
+        savePrizes();
+        document.getElementById('inputPrizeName').value = '';
+      }
+    });
+
+    document.getElementById('resetDefaultPrizesBtn').addEventListener('click', () => {
+      prizes = [...DEFAULT_PRIZES];
+      savePrizes();
+    });
+
+    window.onload = function() {
+      requestAnimationFrame(render);
+    };
+  </script>
+</body>
+</html>
